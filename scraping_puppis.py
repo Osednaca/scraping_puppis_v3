@@ -16,7 +16,6 @@ async def scrape_puppis():
                 "--disable-renderer-backgrounding",
                 "--disable-features=TranslateUI",
                 "--disable-ipc-flooding-protection",
-                "--single-process",             # solo si tenés poca RAM (<1.5 GB)
             ]
         )
         context = await browser.new_context(
