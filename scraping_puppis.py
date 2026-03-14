@@ -25,59 +25,71 @@ async def scrape_puppis():
         )
         page = await context.new_page()
         
-        print("Navigating to Puppis...")
+        # --- Hardcoded highlighted category URLs (Perros + Gatos) ---
+        category_links = [
+            # ===== PERROS - Alimentos =====
+            "https://www.puppis.com.co/perros/alimentos/alimento-seco",
+            "https://www.puppis.com.co/perros/alimentos/alimento-humedo",
+            "https://www.puppis.com.co/perros/snacks",
+            "https://www.puppis.com.co/perros/snacks/bocaditos",
+            "https://www.puppis.com.co/perros/snacks/dentales",
+            "https://www.puppis.com.co/perros/snacks/galletas",
+            "https://www.puppis.com.co/perros/snacks/salsas",
+            "https://www.puppis.com.co/perros/snacks/cremosos",
+            # ===== PERROS - Estética e higiene =====
+            "https://www.puppis.com.co/perros/estetica-e-higiene/recolectores-y-bolsas",
+            "https://www.puppis.com.co/perros/estetica-e-higiene/cepillos-y-peines",
+            "https://www.puppis.com.co/perros/estetica-e-higiene/shampoo-acondicionador-y-jabones",
+            "https://www.puppis.com.co/perros/estetica-e-higiene/limpieza-dental",
+            "https://www.puppis.com.co/perros/estetica-e-higiene/eliminadores-de-olores-y-manchas",
+            # ===== PERROS - Medicamentos =====
+            "https://www.puppis.com.co/perros/desparasitantes",
+            "https://www.puppis.com.co/perros/medicamentos/complementos-y-suplementos",
+            # ===== GATOS - Alimentos =====
+            "https://www.puppis.com.co/gatos/alimentos/alimento-seco",
+            "https://www.puppis.com.co/gatos/alimentos/alimento-humedo",
+            "https://www.puppis.com.co/gatos/snack",
+            "https://www.puppis.com.co/gatos/snack/bocaditos",
+            "https://www.puppis.com.co/gatos/snack/dentals",
+            "https://www.puppis.com.co/gatos/snack/cremosos",
+            # ===== GATOS - Estética e higiene =====
+            "https://www.puppis.com.co/gatos/estetica-e-higiene/arenas",
+            "https://www.puppis.com.co/gatos/estetica-e-higiene/areneras",
+            "https://www.puppis.com.co/gatos/estetica-e-higiene/palas-y-bolsas",
+            "https://www.puppis.com.co/gatos/estetica-e-higiene/cepillos-y-peines",
+            "https://www.puppis.com.co/gatos/estetica-e-higiene/eliminadores-de-olores",
+            "https://www.puppis.com.co/gatos/estetica-e-higiene/shampoo-acondicionador-y-jabones",
+            "https://www.puppis.com.co/gatos/estetica-e-higiene/limpieza-dental",
+            # ===== GATOS - Medicamentos =====
+            "https://www.puppis.com.co/gatos/desparasitantes",
+            "https://www.puppis.com.co/gatos/medicamentos/complementos-y-suplementos",
+        ]
+        print(f"Total categories to scrape: {len(category_links)}")
+
+        # --- Handle Location Modal on first page load ---
+        print("Navigating to Puppis to handle location modal...")
         await page.goto("https://www.puppis.com.co/perro", timeout=60000)
-        
-        # --- Handle Location Modal ---
         try:
             print("Checking for location modal...")
-            # Wait a bit for modal to appear
             await page.wait_for_timeout(5000)
-            
-            # Look for common modal elements
-            # Strategy: Look for "Bogotá" option and click it, then "Guardar"
-            # Or just "Guardar" if a default is selected.
             
             if await page.get_by_text("Selecciona tu ubicación").is_visible():
                 print("Modal detected.")
-                # Try to click the dropdown or location if needed. 
-                # Assuming we can just click "Guardar" or select Bogota.
-                # Let's try to find "Bogotá" text and click it.
                 bogota_option = page.get_by_text("Bogotá DC y aledaños")
                 if await bogota_option.is_visible():
                     await bogota_option.click()
                     await page.wait_for_timeout(1000)
                 
-                # Click Guardar
                 guardar_btn = page.get_by_role("button", name="GUARDAR")
                 if await guardar_btn.is_visible():
                     await guardar_btn.click()
                 else:
-                    # Fallback text search
                     await page.get_by_text("GUARDAR").click()
                 
                 print("Modal handled.")
                 await page.wait_for_timeout(2000)
         except Exception as e:
             print(f"Modal handling skipped or failed (might not be present): {e}")
-
-        # --- Get Categories ---
-        print("Extracting categories...")
-        # User mentioned a "Menu" button. We'll try to find categories on the page first.
-        # Usually /perro has subcategories listed.
-        
-        # We look for links that contain /perros/ and are likely categories.
-        # We filter out the main /perro link and duplicates.
-        category_links = await page.evaluate("""
-            () => {
-                const links = Array.from(document.querySelectorAll("a[href^='/perros/']"));
-                return [...new Set(links.map(a => a.href))].filter(href => href !== 'https://www.puppis.com.co/perro');
-            }
-        """)
-        
-        # Deduplicate categories
-        category_links = list(set(category_links))
-        print(f"Found {len(category_links)} categories.")
         
         all_products = []
         
