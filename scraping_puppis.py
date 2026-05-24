@@ -3,13 +3,12 @@ from playwright.async_api import async_playwright
 
 async def scrape_puppis():
     async with async_playwright() as p:
-        # Launch browser (headless=True for server environment, but can be False for debugging)
         browser = await p.chromium.launch(
             headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",      # importante con poca RAM
+                "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--disable-extensions",
                 "--disable-background-timer-throttling",
@@ -23,7 +22,7 @@ async def scrape_puppis():
             viewport={"width": 1280, "height": 720}
         )
         page = await context.new_page()
-        
+
         # --- Hardcoded highlighted category URLs (Perros + Gatos) ---
         category_links = [
             # ===== PERROS - Alimentos =====
@@ -71,27 +70,27 @@ async def scrape_puppis():
         try:
             print("Checking for location modal...")
             await page.wait_for_timeout(5000)
-            
+
             if await page.get_by_text("Selecciona tu ubicación").is_visible():
                 print("Modal detected.")
                 bogota_option = page.get_by_text("Bogotá DC y aledaños")
                 if await bogota_option.is_visible():
                     await bogota_option.click()
                     await page.wait_for_timeout(1000)
-                
+
                 guardar_btn = page.get_by_role("button", name="GUARDAR")
                 if await guardar_btn.is_visible():
                     await guardar_btn.click()
                 else:
                     await page.get_by_text("GUARDAR").click()
-                
+
                 print("Modal handled.")
                 await page.wait_for_timeout(2000)
         except Exception as e:
             print(f"Modal handling skipped or failed (might not be present): {e}")
-        
+
         all_products = []
-        
+
         # Restart browser context every 3 categories to prevent crashes/memory leaks
         for i, link in enumerate(category_links):
             if i % 3 == 0 and i > 0:
@@ -102,31 +101,43 @@ async def scrape_puppis():
                     viewport={"width": 1280, "height": 720}
                 )
                 page = await context.new_page()
-            
+
             print(f"\n📂 [{i+1}/{len(category_links)}] Scraping: {link}")
             try:
                 await page.goto(link, timeout=60000)
-                await page.wait_for_timeout(1000)  # Reduced from 3000ms
-                
+                await page.wait_for_timeout(1000)
+
+                # --- Extraer categoría y subcategoría del breadcrumb ---
+                # El breadcrumb tiene clases con índices: --2 = categoría, --3 = subcategoría
+                breadcrumb_data = await page.evaluate("""
+                    () => {
+                        const cat2 = document.querySelector('a.vtex-breadcrumb-1-x-link--2');
+                        const cat3 = document.querySelector('a.vtex-breadcrumb-1-x-link--3');
+                        return {
+                            category: cat2 ? cat2.innerText.trim() : null,
+                            subcategory: cat3 ? cat3.innerText.trim() : null,
+                        };
+                    }
+                """)
+                category    = breadcrumb_data.get("category")
+                subcategory = breadcrumb_data.get("subcategory")
+                print(f"  📁 Categoría: {category} | Subcategoría: {subcategory}")
+
                 # --- Infinite Scroll & Load More ---
                 clicks = 0
-                max_clicks = 50  # Prevent infinite loop
+                max_clicks = 50
                 while clicks < max_clicks:
-                    # Scroll to bottom
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await page.wait_for_timeout(800)  # Reduced from 2000ms
-                    
-                    # Use JavaScript to find and click the button directly
+                    await page.wait_for_timeout(800)
+
                     button_clicked = await page.evaluate("""
                         () => {
-                            // Look for button with "Mostrar más" text
                             const buttons = Array.from(document.querySelectorAll('button'));
                             const loadMoreBtn = buttons.find(btn => {
                                 const text = btn.innerText || btn.textContent || '';
-                                return text.trim().toLowerCase().includes('mostrar más') || 
+                                return text.trim().toLowerCase().includes('mostrar más') ||
                                        text.trim().toLowerCase().includes('mostrar mas');
                             });
-                            
                             if (loadMoreBtn) {
                                 loadMoreBtn.click();
                                 return true;
@@ -134,48 +145,39 @@ async def scrape_puppis():
                             return false;
                         }
                     """)
-                    
-                    found_button = button_clicked
-                    
-                    if found_button:
+
+                    if button_clicked:
                         clicks += 1
                         print(f"  ✓ Clicked 'Mostrar más' button (click #{clicks})")
-                        await page.wait_for_timeout(1500)  # Reduced from 3000ms
+                        await page.wait_for_timeout(1500)
                     else:
-                        # If button is not visible, we might be at the end.
                         print(f"  ✗ No more 'Mostrar más' button found after {clicks} clicks.")
                         break
-                
+
                 # --- Extract Products & Variations ---
                 print(f"\n📦 Extracting products and variations...")
-                
-                # Use JavaScript to extract all products with their variations
-                # This avoids Playwright locator caching issues
+
                 products_data = await page.evaluate("""
                     async () => {
                         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
                         const products = [];
                         const cards = document.querySelectorAll('a.vtex-product-summary-2-x-clearLink');
-                        
+
                         for (let i = 0; i < cards.length; i++) {
                             try {
                                 const card = cards[i];
-                                
-                                // Scroll into view
+
                                 card.scrollIntoView({ behavior: 'auto', block: 'center' });
                                 await sleep(100);
-                                
-                                // Basic info
+
                                 const titleEl = card.querySelector('h3 > span');
                                 const title = titleEl ? titleEl.innerText.trim() : 'No Title';
                                 const url = card.href || '';
                                 const imgEl = card.querySelector('img');
                                 const image = imgEl ? imgEl.src : null;
-                                
-                                // Variations
+
                                 const presentations = [];
-                                
-                                // Click +1 button if present
+
                                 const plusOne = card.querySelector('div.product-show-more-list');
                                 if (plusOne) {
                                     try {
@@ -183,61 +185,59 @@ async def scrape_puppis():
                                         await sleep(300);
                                     } catch (e) {}
                                 }
-                                
-                                // Get variation buttons
+
                                 const varButtons = card.querySelectorAll('button.product-variation');
-                                
+
                                 if (varButtons.length > 0) {
                                     for (let j = 0; j < varButtons.length; j++) {
                                         const btn = varButtons[j];
                                         const size = btn.innerText.trim();
-                                        
-                                        // Click variation
                                         try {
                                             btn.click();
-                                            await sleep(1000); // Wait for price update
-                                            
-                                            // Re-query price element to get fresh value
-                                            const priceEl = card.querySelector('span[class*=\"sellingPrice\"]');
+                                            await sleep(1000);
+                                            const priceEl = card.querySelector('span[class*="sellingPrice"]');
                                             const price = priceEl ? priceEl.innerText.trim() : 'N/A';
-                                            
                                             presentations.push({ size, price });
                                         } catch (e) {
                                             console.log('Error clicking variation:', e);
                                         }
                                     }
                                 } else {
-                                    // No variations
-                                    const priceEl = card.querySelector('span[class*=\"sellingPrice\"]');
+                                    const priceEl = card.querySelector('span[class*="sellingPrice"]');
                                     const price = priceEl ? priceEl.innerText.trim() : 'N/A';
                                     presentations.push({ size: 'Default', price });
                                 }
-                                
+
                                 products.push({ title, url, image, presentations });
-                                
+
                             } catch (e) {
                                 console.log('Error extracting product:', e);
                             }
                         }
-                        
+
                         return products;
                     }
                 """)
-                
-                # Log the extracted products
+
+                # Agregar categoría y subcategoría a cada producto
+                for prod in products_data:
+                    prod["category"]    = category
+                    prod["subcategory"] = subcategory
+
+                # Log
                 for idx, prod in enumerate(products_data):
                     print(f"  [{idx+1}/{len(products_data)}] {prod['title']}")
+                    print(f"       Categoría: {prod['category']} > {prod['subcategory']}")
                     print(f"       Image: {prod['image'][:50]}..." if prod['image'] else "       Image: None")
                     print(f"       Variations: {len(prod['presentations'])}")
                     for pres in prod['presentations']:
                         print(f"         • {pres['size']}: {pres['price']}")
-                
+
                 print(f"\n✅ Category complete: {len(products_data)} products extracted.")
                 all_products.extend(products_data)
-                
+
             except Exception as e:
                 print(f"Error scraping category {link}: {e}")
-                # If page crashes, try to recover by creating a new page
                 try:
                     await page.close()
                     page = await context.new_page()
@@ -246,14 +246,17 @@ async def scrape_puppis():
                 continue
 
         await browser.close()
-        
-        # Deduplicate products by URL
-        unique_products = {p['url']: p for p in all_products}.values()
-        return list(unique_products)
+
+        # Deduplicate by URL — keep last occurrence to preserve category info
+        seen = {}
+        for p in all_products:
+            seen[p['url']] = p
+        return list(seen.values())
+
 
 if __name__ == "__main__":
-    data = asyncio.run(scrape_puppis())
     import json
+    data = asyncio.run(scrape_puppis())
     with open("products.json", "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"Scraping complete. Saved {len(data)} products to products.json")
