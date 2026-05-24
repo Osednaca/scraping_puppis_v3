@@ -193,10 +193,33 @@ async def scrape_puppis():
                                         const btn = varButtons[j];
                                         const size = btn.innerText.trim();
                                         try {
+                                            // Leer precio ANTES del click para detectar cambio
+                                            const priceElBefore = card.querySelector('span[class*="sellingPrice"]');
+                                            const priceBefore = priceElBefore ? priceElBefore.innerText.trim() : null;
+
                                             btn.click();
-                                            await sleep(1000);
-                                            const priceEl = card.querySelector('span[class*="sellingPrice"]');
-                                            const price = priceEl ? priceEl.innerText.trim() : 'N/A';
+
+                                            // Esperar activamente a que el precio cambie (máx 2s)
+                                            let price = 'N/A';
+                                            for (let t = 0; t < 20; t++) {
+                                                await sleep(100);
+                                                const priceElAfter = card.querySelector('span[class*="sellingPrice"]');
+                                                const priceAfter = priceElAfter ? priceElAfter.innerText.trim() : null;
+
+                                                // Si cambió o es la primera variación, aceptar el valor
+                                                if (priceAfter && (priceAfter !== priceBefore || j === 0)) {
+                                                    price = priceAfter;
+                                                    break;
+                                                }
+                                            }
+
+                                            // Si nunca cambió en 2s, usar el precio actual
+                                            // (puede ser legítimamente el mismo para todas las presentaciones)
+                                            if (price === 'N/A') {
+                                                const priceElFinal = card.querySelector('span[class*="sellingPrice"]');
+                                                price = priceElFinal ? priceElFinal.innerText.trim() : 'N/A';
+                                            }
+
                                             presentations.push({ size, price });
                                         } catch (e) {
                                             console.log('Error clicking variation:', e);
